@@ -1,0 +1,96 @@
+# Board: Waveshare ESP32-S3-ETH (Waveshare)
+# Definition: definitions/boards/waveshare-esp32-s3-eth/manifest.yaml
+
+esphome:
+  name: scm-plus-cc1101-example
+  friendly_name: SCM Plus CC1101 Receiver
+
+esp32:
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+  encryption:
+    key: super-secret
+
+ota:
+  - platform: esphome
+
+ethernet:
+  clk_pin: GPIO13
+  clock_speed: 25MHz
+  cs_pin: GPIO14
+  interrupt_pin: GPIO10
+  miso_pin: GPIO12
+  mosi_pin: GPIO11
+  reset_pin: GPIO9
+  type: W5500
+
+###################################################################
+###################################################################
+###################################################################
+
+light:
+  - platform: esp32_rmt_led_strip
+    id: board_status_led
+    name: "Board Status LED"
+    chipset: WS2812
+    pin: GPIO21
+    num_leds: 1
+    channel_colors: GRB
+    default_transition_length: 0s
+
+# Secondary SPI Bus for the CC1101 module
+# GPIO01 MISO
+# GPIO02 MOSI
+# GPIO03 SCK
+spi:
+  - id: cc1101_spi
+    interface: spi3
+    miso_pin: GPIO1
+    mosi_pin: GPIO2
+    clk_pin:  GPIO3
+
+# Initialize CC1101 using GPIO 17 for Chip Select
+# GPIO15 CSN
+# GPIO17 GDO0
+# GPIO18 GDO2
+cc1101:
+  id: my_cc1101
+  spi_id: cc1101_spi
+  cs_pin: GPIO15
+  frequency: 915.00MHz
+  filter_bandwidth: 800kHz
+  modulation_type: ASK/OOK
+  symbol_rate: 32768
+  
+remote_receiver:
+  - id: rf_receiver
+    idle: 15ms
+    filter: 10us
+    buffer_size: 4096
+    tolerance: 30%
+    filter_symbols: 5
+    dump: []
+    pin:
+      number: GPIO17
+      id: gd0_recv
+      mode:
+        input: true
+
+scm_plus_receiver:
+  id: scm_decoder
+  receiver_id: rf_receiver
+  led_id: board_status_led
+  brightness: 50%
+  meter_id: 12345678
+  topic: meter-receiver/power-meter
+  
+packages: 
+    scm_plus_receiver: github://kgwhitmer/esphome-scm-plus/scm-plus.yaml
+
+
