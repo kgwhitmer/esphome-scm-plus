@@ -1,0 +1,5 @@
+# ONLY TESTED WITH Waveshare ESP32-S3-ETH board
+
+external_components:
+  - source: github://kgwhitmer/esphome-scm-plus
+    components: [ scm_plus_receiver ]
