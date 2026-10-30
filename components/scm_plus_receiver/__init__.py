@@ -4,6 +4,8 @@ from esphome.const import CONF_ID, CONF_BRIGHTNESS, CONF_TOPIC
 from esphome.components import remote_base, light
 from esphome import automation
 
+DEPENDENCIES = ["json"]
+
 scm_plus_ns = cg.esphome_ns.namespace("scm_plus")
 ScmPlusDecoder = scm_plus_ns.class_("ScmPlusDecoder", cg.Component)
 
