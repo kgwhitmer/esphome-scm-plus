@@ -2,8 +2,8 @@
 
 #include "esphome.h"
 #include "esphome/core/application.h"
+#include "esphome/core/automation.h"
 #include "esphome/components/remote_base/remote_base.h"
-#include "esphome/components/light/light_state.h"
 #include "esphome/components/mqtt/mqtt_client.h" 
 #include <cmath> 
 #include <vector>
@@ -12,6 +12,15 @@
 
 #include "remote_receiver_helpers.h"
 #include "bit_stream_handling.h"
+
+// Forward declare LightState so pointer member variable is valid without including the header
+namespace esphome::light {
+class LightState;
+}
+
+#ifdef USE_LIGHT
+#include "esphome/components/light/light_state.h"
+#endif
 
 namespace scm_plus {
 
@@ -27,6 +36,8 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
   uint32_t receive_call_count_{0};
   std::vector<uint32_t> filter_meter_ids_; 
   std::string custom_base_topic_{""}; 
+
+  esphome::CallbackManager<void(JsonObject)> json_callback_{};
 
   ScmPlusDecoder(float brightness) : brightness_scale_(brightness) {}
 
@@ -45,6 +56,11 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
     this->filter_meter_ids_.push_back(meter_id);
   }
 
+  template<typename F>
+  void add_on_json_callback(F &&callback) {
+    this->json_callback_.add(std::forward<F>(callback));
+  }
+
   void set_led_color(float r_coeff, float g_coeff, float b_coeff) {
     this->current_r_ = r_coeff;
     this->current_g_ = g_coeff;
@@ -52,11 +68,13 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
 
     if (this->status_led_ == nullptr) return;
 
+#ifdef USE_LIGHT
     auto call = this->status_led_->make_call();
     call.set_state(true);
     call.set_brightness(this->brightness_scale_);
     call.set_rgb(this->current_r_, this->current_g_, this->current_b_);
     call.perform();
+#endif
   }
 
   enum class DecodeResult {
@@ -112,7 +130,6 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
       p_id = bit_stream_handling::read_bits(stream, payload_idx + 0, 8);
       if (p_id != 0x1e) return DecodeResult::NOT_SCM;
 
-      // Extract all payload fields regardless of CRC so we can inspect/log them on failure
       m_type = bit_stream_handling::read_bits(stream, payload_idx + 8, 8) & 0x0F;
       m_id = bit_stream_handling::read_bits(stream, payload_idx + 16, 32);
       cons = bit_stream_handling::read_bits(stream, payload_idx + 48, 32);
@@ -148,7 +165,6 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
         return false;
       }
 
-      // CRC error -> invert the unused stream and try
       std::vector<bool> inverted_sec = secondary;
       for (size_t k = 0; k < inverted_sec.size(); k++) {
         inverted_sec[k] = !inverted_sec[k];
@@ -171,7 +187,6 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
       return false;
     }
 
-    // If a target meter ID filter list is configured, drop packets from any meter not present in the list
     if (!this->filter_meter_ids_.empty()) {
       auto it = std::find(this->filter_meter_ids_.begin(), this->filter_meter_ids_.end(), meter_id);
       if (it == this->filter_meter_ids_.end()) {
@@ -179,7 +194,6 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
       }
     }
 
-    // Log all decoded packet field values before validating the CRC
     ESP_LOGI("scm_decode", "SCM+ Packet Decoded -> Protocol ID: 0x%02X | Meter Type: 0x%02X | Meter ID: %u | Consumption: %u | Tamper: 0x%04X | CRC Expected: 0x%04X | CRC Calculated: 0x%04X",
              static_cast<unsigned int>(protocol_id),
              static_cast<unsigned int>(meter_type),
@@ -189,12 +203,20 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
              static_cast<unsigned int>(expected_crc),
              static_cast<unsigned int>(calculated_crc));
 
-    // Evaluate CRC validity and handle red LED feedback if check fails
     if (decode_result == DecodeResult::CRC_FAILED) {
       ESP_LOGD("scm_led", "LED: Red - SCM+ packet CRC validation failed");
       this->set_led_color(1.0f, 0.0f, 0.0f);  // Solid Red
       return false;
     }
+
+    JsonDocument doc;
+    JsonObject root = doc.to<JsonObject>();
+    root["meter_id"] = meter_id;
+    root["consumption"] = consumption;
+    root["meter_type"] = meter_type;
+    root["tamper"] = tamper;
+    root["protocol_id"] = protocol_id;
+    this->json_callback_.call(root);
 
 #ifdef USE_MQTT
     if (esphome::mqtt::global_mqtt_client != nullptr && esphome::mqtt::global_mqtt_client->is_connected()) {

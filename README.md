@@ -8,7 +8,20 @@ This ESPHome external component provides a SCM+ decoder for ESPHome [remote_rece
     packages: 
         scm_plus_receiver: github://kgwhitmer/esphome-scm-plus/scm-plus.yaml
     ```
-2.  Add the scm_plusrtl_433 config to your yaml with a remote_reciver id and an on_json_message handler...
+2.  Add the scm_plus config to your yaml with a remote_reciver id and an on_json message handler...
+    ```yaml
+    scm_plus_receiver:
+      receiver_id: rf_receiver
+      on_json:
+        then:
+          - lambda: |-
+              std::string s;
+              serializeJson(root, s);
+              ESP_LOGD("SCM+ JSON: ", "%s", s.c_str());
+    ```
+
+    ...or add the optional meter filtering, adjust frequency, led settings or mqtt settings...
+
     ```yaml
     scm_plus_receiver:
       id: scm_decoder
@@ -18,4 +31,4 @@ This ESPHome external component provides a SCM+ decoder for ESPHome [remote_rece
       meter_id: 12345678
       topic: meter-receiver/power-meter
     ```
-3.  Meter IDs and consumption values are sent via MQTT
+    ...and matching meter IDs and consumption values are sent via MQTT
