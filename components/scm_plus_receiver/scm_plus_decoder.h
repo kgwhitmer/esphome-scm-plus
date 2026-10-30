@@ -45,10 +45,8 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
   ScmPlusDecoder(float brightness) : brightness_scale_(brightness) {}
 
   void setup() override {
-    if (this->status_led_ != nullptr) {
-      ESP_LOGD("scm_led", "LED: Blue - Component initialization / boot");
-      this->set_led_color(0.0f, 0.0f, 1.0f);  // Solid Blue
-    }
+    ESP_LOGD("scm_status", "Component initialization / boot");
+    this->set_led_color(0.0f, 0.0f, 1.0f);
   }
 
   void set_status_led(esphome::light::LightState *led) { this->status_led_ = led; }
@@ -92,9 +90,9 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
     this->cancel_timeout("scm_inactivity_watchdog");
     this->set_timeout("scm_inactivity_watchdog", 600000, [this]() {
       if (this->receive_call_count_ == 0) {
-        this->set_led_color(1.0f, 0.0f, 1.0f);  // Solid Purple
+        this->set_led_color(1.0f, 0.0f, 1.0f);
       } else {
-        this->set_led_color(1.0f, 1.0f, 0.0f);  // Solid Yellow
+        this->set_led_color(1.0f, 1.0f, 0.0f);
       }
       ESP_LOGD("scm_status", "No data received for 10 minutes (%u calls).", static_cast<unsigned int>(this->receive_call_count_));
     });
@@ -207,8 +205,8 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
              static_cast<unsigned int>(calculated_crc));
 
     if (decode_result == DecodeResult::CRC_FAILED) {
-      ESP_LOGD("scm_led", "LED: Red - SCM+ packet CRC validation failed");
-      this->set_led_color(1.0f, 0.0f, 0.0f);  // Solid Red
+      ESP_LOGD("scm_status", "SCM+ packet CRC validation failed");
+      this->set_led_color(1.0f, 0.0f, 0.0f);
       return false;
     }
 
@@ -234,18 +232,18 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
       esphome::mqtt::global_mqtt_client->publish(mqtt_topic, mqtt_payload, 0, true);
       ESP_LOGI("scm_mqtt", "MQTT Stream Success -> Published to %s: %s", mqtt_topic.c_str(), mqtt_payload.c_str());
       
-      ESP_LOGD("scm_led", "LED: Green - Successful MQTT publish / valid packet processed");
-      this->set_led_color(0.0f, 1.0f, 0.0f);  // Solid Green
+      ESP_LOGD("scm_status", "Successful MQTT publish / valid packet processed");
+      this->set_led_color(0.0f, 1.0f, 0.0f);
       return true;
     } else {
       ESP_LOGW("scm_mqtt", "MQTT Stream Skipped -> Client disconnected from broker.");
-      ESP_LOGD("scm_led", "LED: Red - MQTT client disconnected from broker");
-      this->set_led_color(1.0f, 0.0f, 0.0f);  // Solid Red
+      ESP_LOGD("scm_status", "MQTT client disconnected from broker");
+      this->set_led_color(1.0f, 0.0f, 0.0f);
       return false;
     }
 #else
-    ESP_LOGD("scm_led", "LED: Green - Valid packet processed (MQTT disabled)");
-    this->set_led_color(0.0f, 1.0f, 0.0f);  // Solid Green
+    ESP_LOGD("scm_status", "Valid packet processed (MQTT disabled)");
+    this->set_led_color(0.0f, 1.0f, 0.0f);
     return true;
 #endif
   }
