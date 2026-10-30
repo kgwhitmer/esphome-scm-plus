@@ -4,7 +4,6 @@
 #include "esphome/core/application.h"
 #include "esphome/core/automation.h"
 #include "esphome/components/remote_base/remote_base.h"
-#include "esphome/components/mqtt/mqtt_client.h" 
 #include <cmath> 
 #include <vector>
 #include <string>
@@ -20,6 +19,10 @@ class LightState;
 
 #ifdef USE_LIGHT
 #include "esphome/components/light/light_state.h"
+#endif
+
+#ifdef USE_MQTT
+#include "esphome/components/mqtt/mqtt_client.h"
 #endif
 
 namespace scm_plus {
