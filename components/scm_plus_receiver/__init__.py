@@ -4,7 +4,7 @@ from esphome.const import CONF_ID, CONF_BRIGHTNESS, CONF_TOPIC
 from esphome.components import remote_base, light
 from esphome import automation
 
-# Automatically load the json component if it's not already present
+DOMAIN = "scm_plus_receiver"
 AUTO_LOAD = ["json"]
 
 scm_plus_ns = cg.esphome_ns.namespace("scm_plus")
