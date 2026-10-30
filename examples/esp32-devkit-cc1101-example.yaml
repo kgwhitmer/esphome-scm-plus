@@ -33,8 +33,6 @@ captive_portal:
 ###############################################################
 ###############################################################
 
-json: # required when mqtt not specified
-
 spi:
   clk_pin: GPIO18
   mosi_pin: GPIO23
