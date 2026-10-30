@@ -1,0 +1,78 @@
+# Board: ESP32 DevKit V1 (Espressif)
+# Definition: definitions/boards/esp32-devkit-v1/manifest.yaml
+
+esphome:
+  name: esp32-devkit-cc1101-example
+  friendly_name: ESP32 DevKit CC1101 Example
+
+esp32:
+  variant: esp32
+  flash_size: 4MB
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+  encryption:
+    key: supersecret
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: ESP32 DevKit Ex Fallback Hotspot
+    password: 12345678
+
+captive_portal:
+
+###############################################################
+###############################################################
+###############################################################
+
+json: # required when mqtt not specified
+
+spi:
+  clk_pin: GPIO18
+  mosi_pin: GPIO23
+  miso_pin: GPIO19
+
+cc1101:
+  id: my_cc1101
+  cs_pin: GPIO05
+  frequency: 915.00MHz
+  filter_bandwidth: 800kHz
+  modulation_type: ASK/OOK
+  symbol_rate: 32768
+
+remote_receiver:
+  - id: rf_receiver
+    idle: 15ms
+    filter: 10us
+    buffer_size: 4096
+    tolerance: 30%
+    filter_symbols: 5
+    dump: raw
+    pin: GPIO02
+
+packages: 
+    scm_plus_receiver: github://kgwhitmer/esphome-scm-plus/scm-plus.yaml
+    
+scm_plus_receiver:
+  id: scm_decoder
+  receiver_id: rf_receiver
+  on_json:
+    then:
+      - lambda: |-
+          std::string s;
+          serializeJson(root, s);
+          ESP_LOGD("SCM+ JSON: ", "%s", s.c_str());
+      - logger.log:
+          format: "SCM+ JSON Trigger -> Meter ID: %u | Consumption: %u | Type: %u"
+          args:
+            - !lambda '(unsigned int) root["meter_id"]'
+            - !lambda '(unsigned int) root["consumption"]'
+            - !lambda '(unsigned int) root["meter_type"]'
