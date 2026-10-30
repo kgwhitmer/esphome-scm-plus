@@ -3,6 +3,7 @@
 #include "esphome.h"
 #include "esphome/core/application.h"
 #include "esphome/core/automation.h"
+#include "esphome/core/json.h"
 #include "esphome/components/remote_base/remote_base.h"
 #include <cmath> 
 #include <vector>
