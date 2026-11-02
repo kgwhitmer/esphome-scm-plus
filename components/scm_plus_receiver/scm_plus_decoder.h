@@ -128,8 +128,10 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
     std::optional<size_t> sync_idx = std::nullopt;
     uint8_t sync_bit_errors = 0;
     int matched_variation = 0;
+    std::vector<bool> *active_target_stream = nullptr;
 
-    auto decode_stream = [&](const std::vector<bool> &stream, size_t s_idx, uint8_t &p_id, uint8_t &m_type, uint32_t &m_id, uint32_t &cons, uint16_t &tamp, uint16_t &exp_crc, uint16_t &calc_crc) -> DecodeResult {
+    // Notice std::vector<bool> &stream is now non-const to allow correction mutation
+    auto decode_stream = [&](std::vector<bool> &stream, size_t s_idx, uint8_t &p_id, uint8_t &m_type, uint32_t &m_id, uint32_t &cons, uint16_t &tamp, uint16_t &exp_crc, uint16_t &calc_crc) -> DecodeResult {
       size_t payload_idx = s_idx + 12;
       if (stream.size() < payload_idx + 96 + 16) return DecodeResult::TOO_SHORT;
 
@@ -149,6 +151,18 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
         return DecodeResult::CRC_FAILED;
       }
 
+      // Can cause corruption if more than single bit errors present
+      // if (calc_crc != exp_crc) {
+      //   // Attempt O(1) single-bit error correction via syndrome lookup table
+      //   if (bit_stream_handling::correct_single_bit_error_lookup(stream, payload_idx, 96, exp_crc, calc_crc)) {
+      //     ESP_LOGI("scm_checksum", "Successfully corrected single-bit error via syndrome lookup!");
+      //     calc_crc = exp_crc; // Re-sync checksum validation state after fix
+      //   } else {
+      //     ESP_LOGW("scm_checksum", "Checksum mismatch: calculated 0x%04X, expected 0x%04X", calc_crc, exp_crc);
+      //     return DecodeResult::CRC_FAILED;
+      //   }
+      // }
+
       return DecodeResult::SUCCESS;
     };
 
@@ -157,12 +171,12 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
       bool is_odd = (variation == 1 || variation == 3);
       bool is_inverted = (variation == 2 || variation == 3);
 
-      const std::vector<bool> *target_stream = nullptr;
+      std::vector<bool> *target_stream = nullptr;
       if (!is_inverted) {
         target_stream = is_odd ? &odd_stream : &even_stream;
       } else {
         if (is_odd) {
-          odd_stream.flip(); // Added missing semicolon here
+          odd_stream.flip();
           target_stream = &odd_stream;
         } else {
           even_stream.flip();
@@ -174,26 +188,27 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
       if (result.has_value()) {
         sync_idx = result;
         sync_bit_errors = __builtin_popcount(bit_stream_handling::read_bits(*target_stream, sync_idx.value(), 12) ^ 0x6A3);
-
+        matched_variation = variation;
+        active_target_stream = target_stream;
         ESP_LOGD("scm_decode", "SCM+ Sync found at index: %zu with variation: %d", sync_idx.value(), variation);
-        decode_result = decode_stream(*target_stream, sync_idx.value(), protocol_id, meter_type, meter_id, consumption, tamper, expected_crc, calculated_crc);
-
-        if (decode_result == DecodeResult::TOO_SHORT) {
-          ESP_LOGD("scm_decode", "Not enough data received (%zu bits)", target_stream->size());
-          return false;
-        }
-
-        if (decode_result == DecodeResult::UNSUPPORTED_PROTOCOL) {
-          ESP_LOGD("scm_decode", "Unsupported protocol ID (0x%02X)", static_cast<unsigned int>(protocol_id));
-          return false;
-        }
-
         break;
       }
     }
 
     if (!sync_idx.has_value()) {
-      ESP_LOGD("scm_decode", "Sync not found, stream bit len: %d", even_stream.size());
+      ESP_LOGD("scm_decode", "Sync was not found");
+      return false;
+    }
+
+    decode_result = decode_stream(*active_target_stream, sync_idx.value(), protocol_id, meter_type, meter_id, consumption, tamper, expected_crc, calculated_crc);
+
+    if (decode_result == DecodeResult::TOO_SHORT) {
+      ESP_LOGD("scm_decode", "Not enough bits received (%zu bits)", active_target_stream->size());
+      return false;
+    }
+
+    if (decode_result == DecodeResult::UNSUPPORTED_PROTOCOL) {
+      ESP_LOGD("scm_decode", "Unsupported protocol ID (0x%02X)", static_cast<unsigned int>(protocol_id));
       return false;
     }
 
@@ -217,7 +232,7 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
             allowed_str += ", ";
           }
         }
-        ESP_LOGD("scm_filter", "Meter ID %u ignored (not in allowed list: [%s])",
+        ESP_LOGI("scm_filter", "Meter ID %u ignored (not in allowed list: [%s])",
                  static_cast<unsigned int>(meter_id), allowed_str.c_str());
         return false; 
       }
@@ -255,7 +270,8 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
       this->set_led_color(0.0f, 1.0f, 0.0f);
       return true;
     } else {
-      ESP_LOGW("scm_status", "MQTT client disconnected from broker");
+      ESP_LOGW("scm_mqtt", "MQTT Stream Skipped -> Client disconnected from broker.");
+      ESP_LOGD("scm_status", "MQTT client disconnected from broker");
       this->set_led_color(1.0f, 0.0f, 0.0f);
       return false;
     }
