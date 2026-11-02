@@ -175,11 +175,11 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
         sync_idx = result;
         sync_bit_errors = __builtin_popcount(bit_stream_handling::read_bits(*target_stream, sync_idx.value(), 12) ^ 0x6A3);
 
-        ESP_LOGI("scm_decode", "SCM+ Sync found at index: %zu with variation: %d", sync_idx.value(), variation);
+        ESP_LOGD("scm_decode", "SCM+ Sync found at index: %zu with variation: %d", sync_idx.value(), variation);
         decode_result = decode_stream(*target_stream, sync_idx.value(), protocol_id, meter_type, meter_id, consumption, tamper, expected_crc, calculated_crc);
 
         if (decode_result == DecodeResult::TOO_SHORT) {
-          ESP_LOGD("scm_decode", "Not enough bits received (%zu bits)", target_stream->size());
+          ESP_LOGD("scm_decode", "Not enough data received (%zu bits)", target_stream->size());
           return false;
         }
 
@@ -193,7 +193,7 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
     }
 
     if (!sync_idx.has_value()) {
-      ESP_LOGD("scm_decode", "Sync was not found");
+      ESP_LOGD("scm_decode", "Sync not found, stream bit len: %d", even_stream.size());
       return false;
     }
 
@@ -255,8 +255,7 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
       this->set_led_color(0.0f, 1.0f, 0.0f);
       return true;
     } else {
-      ESP_LOGW("scm_mqtt", "MQTT Stream Skipped -> Client disconnected from broker.");
-      ESP_LOGD("scm_status", "MQTT client disconnected from broker");
+      ESP_LOGW("scm_status", "MQTT client disconnected from broker");
       this->set_led_color(1.0f, 0.0f, 0.0f);
       return false;
     }
@@ -268,4 +267,4 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
   }
 };
 
-}  // namespace scm_plus1
+}  // namespace scm_plus
