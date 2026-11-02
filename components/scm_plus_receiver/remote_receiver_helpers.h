@@ -18,9 +18,10 @@ inline std::vector<bool> extract_raw_bits(const esphome::remote_base::RemoteRece
     bool bit_value = (duration_raw > 0); 
 
     if (duration > max_noise_duration_us) {
-      if (raw_bits.size() > 40) break; 
-      raw_bits.clear();
-      continue;
+      // if (raw_bits.size() > 40) break; 
+      // raw_bits.clear();
+      // continue;
+      break;
     }
 
     float bit_count_fraction = (float)duration / bit_period_us;

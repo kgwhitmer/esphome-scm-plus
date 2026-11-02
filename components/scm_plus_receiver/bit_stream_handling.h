@@ -8,7 +8,16 @@
 
 namespace bit_stream_handling {
 
-inline std::optional<size_t> scan_stream(const std::vector<bool> &stream, uint16_t pattern, size_t pattern_len, std::optional<size_t> scan_distance = std::nullopt) {
+inline uint32_t read_bits(const std::vector<bool> &stream, size_t start, size_t len) {
+  uint32_t val = 0;
+  for (size_t k = 0; k < len; k++) {
+    bool bit = stream[start + k];
+    val = (val << 1) | (bit ? 1 : 0);
+  }
+  return val;
+}
+
+inline std::optional<size_t> scan_stream(const std::vector<bool> &stream, uint16_t pattern, size_t pattern_len, std::optional<size_t> scan_distance = std::nullopt, uint8_t bit_errs = 0) {
   size_t dist = scan_distance.value_or(stream.size());
 
   if (stream.size() < pattern_len) return std::nullopt;
@@ -19,25 +28,15 @@ inline std::optional<size_t> scan_stream(const std::vector<bool> &stream, uint16
   }
 
   for (size_t i = 0; i <= limit; i++) {
-    uint16_t window = 0;
-    for (size_t j = 0; j < pattern_len; j++) {
-      window = (window << 1) | (stream[i + j] ? 1 : 0);
-    }
+    uint32_t window = read_bits(stream, i, pattern_len);
+    uint32_t diff = window ^ pattern;
+    uint8_t current_errors = __builtin_popcount(diff);
 
-    if (window == pattern) {
+    if (current_errors <= bit_errs) {
       return i; // Return index where pattern match starts
     }
   }
   return std::nullopt;
-}
-
-inline uint32_t read_bits(const std::vector<bool> &stream, size_t start, size_t len) {
-  uint32_t val = 0;
-  for (size_t k = 0; k < len; k++) {
-    bool bit = stream[start + k];
-    val = (val << 1) | (bit ? 1 : 0);
-  }
-  return val;
 }
 
 inline uint16_t calculate_crc16_ccitt(const std::vector<bool> &stream, size_t start, size_t num_bits) {

@@ -79,7 +79,8 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
   }
 
   enum class DecodeResult {
-    NOT_SCM = 0,
+    TOO_SHORT = 0,
+    UNSUPPORTED_PROTOCOL,
     SUCCESS,
     CRC_FAILED
   };
@@ -100,7 +101,7 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
     std::vector<bool> raw_bits = remote_receiver_helpers::extract_raw_bits(data);
 
     if (raw_bits.size() < 100) {
-      ESP_LOGD("scm_decode", "Received transmission ignored: not enough raw bits extracted (%zu bits)", raw_bits.size());
+      ESP_LOGD("scm_decode", "Received transmission ignored: too short (%zu bits)", raw_bits.size());
       return false; 
     }
 
@@ -116,7 +117,7 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
       odd_stream.push_back(raw_bits[i]);
     }
 
-    DecodeResult decode_result = DecodeResult::NOT_SCM;
+    DecodeResult decode_result = DecodeResult::UNSUPPORTED_PROTOCOL;
     uint8_t protocol_id = 0;
     uint8_t meter_type = 0;
     uint32_t meter_id = 0;
@@ -124,13 +125,16 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
     uint16_t tamper = 0;
     uint16_t expected_crc = 0;
     uint16_t calculated_crc = 0;
+    std::optional<size_t> sync_idx = std::nullopt;
+    uint8_t sync_bit_errors = 0;
+    int matched_variation = 0;
 
-    auto decode_stream = [&](const std::vector<bool> &stream, size_t sync_idx, uint8_t &p_id, uint8_t &m_type, uint32_t &m_id, uint32_t &cons, uint16_t &tamp, uint16_t &exp_crc, uint16_t &calc_crc) -> DecodeResult {
-      size_t payload_idx = sync_idx + 12;
-      if (stream.size() < payload_idx + 96 + 16) return DecodeResult::NOT_SCM;
+    auto decode_stream = [&](const std::vector<bool> &stream, size_t s_idx, uint8_t &p_id, uint8_t &m_type, uint32_t &m_id, uint32_t &cons, uint16_t &tamp, uint16_t &exp_crc, uint16_t &calc_crc) -> DecodeResult {
+      size_t payload_idx = s_idx + 12;
+      if (stream.size() < payload_idx + 96 + 16) return DecodeResult::TOO_SHORT;
 
       p_id = bit_stream_handling::read_bits(stream, payload_idx + 0, 8);
-      if (p_id != 0x1e) return DecodeResult::NOT_SCM;
+      if (p_id != 0x1e) return DecodeResult::UNSUPPORTED_PROTOCOL;
 
       m_type = bit_stream_handling::read_bits(stream, payload_idx + 8, 8) & 0x0F;
       m_id = bit_stream_handling::read_bits(stream, payload_idx + 16, 32);
@@ -148,48 +152,60 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
       return DecodeResult::SUCCESS;
     };
 
-    for (int i = 0; i < 2; i++) {
-      const auto &primary = (i == 0) ? even_stream : odd_stream;
-      const auto &secondary = (i == 0) ? odd_stream : even_stream;
+    // Loop through stream variations using an integer (0: even, 1: odd, 2: inverted even, 3: inverted odd)
+    for (int variation = 0; variation < 4; variation++) {
+      bool is_odd = (variation == 1 || variation == 3);
+      bool is_inverted = (variation == 2 || variation == 3);
 
-      auto result = bit_stream_handling::scan_stream(primary, 0x6A3, 12, 96);
-      if (!result.has_value()) {
-        continue;
-      }
-
-      decode_result = decode_stream(primary, result.value(), protocol_id, meter_type, meter_id, consumption, tamper, expected_crc, calculated_crc);
-
-      if (decode_result == DecodeResult::SUCCESS) {
-        break;
-      }
-
-      if (decode_result == DecodeResult::NOT_SCM) {
-        ESP_LOGD("scm_decode", "Received transmission identified as not SCM+ (invalid protocol ID or payload)");
-        return false;
-      }
-
-      std::vector<bool> inverted_sec = secondary;
-      for (size_t k = 0; k < inverted_sec.size(); k++) {
-        inverted_sec[k] = !inverted_sec[k];
-      }
-
-      auto inv_result = bit_stream_handling::scan_stream(inverted_sec, 0x6A3, 12, 96);
-      if (inv_result.has_value()) {
-        DecodeResult inv_res = decode_stream(inverted_sec, inv_result.value(), protocol_id, meter_type, meter_id, consumption, tamper, expected_crc, calculated_crc);
-        if (inv_res == DecodeResult::SUCCESS) {
-          decode_result = DecodeResult::SUCCESS;
-        } else if (inv_res == DecodeResult::CRC_FAILED) {
-          decode_result = DecodeResult::CRC_FAILED;
+      const std::vector<bool> *target_stream = nullptr;
+      if (!is_inverted) {
+        target_stream = is_odd ? &odd_stream : &even_stream;
+      } else {
+        if (is_odd) {
+          odd_stream.flip(); // Added missing semicolon here
+          target_stream = &odd_stream;
+        } else {
+          even_stream.flip();
+          target_stream = &even_stream;
         }
       }
 
-      break;
+      auto result = bit_stream_handling::scan_stream(*target_stream, 0x6A3, 12, 96, 1);
+      if (result.has_value()) {
+        sync_idx = result;
+        sync_bit_errors = __builtin_popcount(bit_stream_handling::read_bits(*target_stream, sync_idx.value(), 12) ^ 0x6A3);
+
+        ESP_LOGI("scm_decode", "SCM+ Sync found at index: %zu with variation: %d", sync_idx.value(), variation);
+        decode_result = decode_stream(*target_stream, sync_idx.value(), protocol_id, meter_type, meter_id, consumption, tamper, expected_crc, calculated_crc);
+
+        if (decode_result == DecodeResult::TOO_SHORT) {
+          ESP_LOGD("scm_decode", "Not enough bits received (%zu bits)", target_stream->size());
+          return false;
+        }
+
+        if (decode_result == DecodeResult::UNSUPPORTED_PROTOCOL) {
+          ESP_LOGD("scm_decode", "Unsupported protocol ID (0x%02X)", static_cast<unsigned int>(protocol_id));
+          return false;
+        }
+
+        break;
+      }
     }
 
-    if (decode_result == DecodeResult::NOT_SCM) {
-      ESP_LOGD("scm_decode", "Received transmission identified as not SCM+ (sync preamble not found)");
+    if (!sync_idx.has_value()) {
+      ESP_LOGD("scm_decode", "Sync was not found");
       return false;
     }
+
+    ESP_LOGI("scm_decode", "SCM+ Packet Decoded (Sync Errors: %u) -> Protocol ID: 0x%02X | Meter Type: 0x%02X | Meter ID: %u | Consumption: %u | Tamper: 0x%04X | CRC Expected: 0x%04X | CRC Calculated: 0x%04X",
+             static_cast<unsigned int>(sync_bit_errors),
+             static_cast<unsigned int>(protocol_id),
+             static_cast<unsigned int>(meter_type),
+             static_cast<unsigned int>(meter_id),
+             static_cast<unsigned int>(consumption),
+             static_cast<unsigned int>(tamper),
+             static_cast<unsigned int>(expected_crc),
+             static_cast<unsigned int>(calculated_crc));
 
     if (!this->filter_meter_ids_.empty()) {
       auto it = std::find(this->filter_meter_ids_.begin(), this->filter_meter_ids_.end(), meter_id);
@@ -206,15 +222,6 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
         return false; 
       }
     }
-
-    ESP_LOGI("scm_decode", "SCM+ Packet Decoded -> Protocol ID: 0x%02X | Meter Type: 0x%02X | Meter ID: %u | Consumption: %u | Tamper: 0x%04X | CRC Expected: 0x%04X | CRC Calculated: 0x%04X",
-             static_cast<unsigned int>(protocol_id),
-             static_cast<unsigned int>(meter_type),
-             static_cast<unsigned int>(meter_id),
-             static_cast<unsigned int>(consumption),
-             static_cast<unsigned int>(tamper),
-             static_cast<unsigned int>(expected_crc),
-             static_cast<unsigned int>(calculated_crc));
 
     if (decode_result == DecodeResult::CRC_FAILED) {
       ESP_LOGD("scm_status", "SCM+ packet CRC validation failed");
@@ -261,4 +268,4 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
   }
 };
 
-}  // namespace scm_plus
+}  // namespace scm_plus1
