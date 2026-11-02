@@ -100,6 +100,7 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
     std::vector<bool> raw_bits = remote_receiver_helpers::extract_raw_bits(data);
 
     if (raw_bits.size() < 100) {
+      ESP_LOGD("scm_decode", "Received transmission ignored: not enough raw bits extracted (%zu bits)", raw_bits.size());
       return false; 
     }
 
@@ -163,6 +164,7 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
       }
 
       if (decode_result == DecodeResult::NOT_SCM) {
+        ESP_LOGD("scm_decode", "Received transmission identified as not SCM+ (invalid protocol ID or payload)");
         return false;
       }
 
@@ -185,12 +187,22 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
     }
 
     if (decode_result == DecodeResult::NOT_SCM) {
+      ESP_LOGD("scm_decode", "Received transmission identified as not SCM+ (sync preamble not found)");
       return false;
     }
 
     if (!this->filter_meter_ids_.empty()) {
       auto it = std::find(this->filter_meter_ids_.begin(), this->filter_meter_ids_.end(), meter_id);
       if (it == this->filter_meter_ids_.end()) {
+        std::string allowed_str = "";
+        for (size_t k = 0; k < this->filter_meter_ids_.size(); k++) {
+          allowed_str += std::to_string(this->filter_meter_ids_[k]);
+          if (k + 1 < this->filter_meter_ids_.size()) {
+            allowed_str += ", ";
+          }
+        }
+        ESP_LOGD("scm_filter", "Meter ID %u ignored (not in allowed list: [%s])",
+                 static_cast<unsigned int>(meter_id), allowed_str.c_str());
         return false; 
       }
     }
