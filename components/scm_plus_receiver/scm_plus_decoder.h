@@ -40,6 +40,7 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
   uint32_t successful_receive_count_{0};
   uint32_t sync_error_receive_count_{0};
   uint32_t crc_failure_count_{0};
+
   std::vector<uint32_t> filter_meter_ids_; 
   std::string custom_base_topic_{""}; 
 
@@ -51,13 +52,21 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
     ESP_LOGD("scm_status", "Component initialization / boot");
     this->set_led_color(0.0f, 0.0f, 1.0f);
 
-    // Set up a 60-minute interval (3,600,000 ms) to publish MQTT stats
+    // Set up a 60-minute interval (3,600,000 ms) to log and publish stats
     this->set_interval("scm_stats_publisher", 3600000, [this]() {
+      // Always log stats regardless of MQTT status
+      ESP_LOGI("scm_stats", "Stats Report -> ID: %s | Uptime: %u s | Successful Messages: %u | Sync Error Messages: %u | CRC Failures: %u",
+               esphome::App.get_name().c_str(),
+               static_cast<unsigned int>(esphome::millis() / 1000),
+               static_cast<unsigned int>(this->successful_receive_count_),
+               static_cast<unsigned int>(this->sync_error_receive_count_),
+               static_cast<unsigned int>(this->crc_failure_count_));
+
 #ifdef USE_MQTT
       if (esphome::mqtt::global_mqtt_client != nullptr && esphome::mqtt::global_mqtt_client->is_connected()) {
         std::string base_topic = this->custom_base_topic_;
         if (base_topic.empty()) {
-          base_topic = "esphome/" + esphome::App.get_name();
+          base_topic = "esphome/" + std::string(esphome::App.get_name());
         }
 
         std::string stats_topic = base_topic + "/stats";
@@ -65,7 +74,7 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
         JsonDocument stats_doc;
         JsonObject stats_root = stats_doc.to<JsonObject>();
         stats_root["id"] = esphome::App.get_name();
-        stats_root["uptime"] = esphome::millis() / 1000; // Uptime in seconds (explicitly scoped)
+        stats_root["uptime"] = esphome::millis() / 1000; // Uptime in seconds
         stats_root["successful_messages"] = this->successful_receive_count_;
         stats_root["sync_error_messages"] = this->sync_error_receive_count_;
         stats_root["crc_failures"] = this->crc_failure_count_;
@@ -74,12 +83,7 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
         serializeJson(stats_doc, stats_payload);
 
         esphome::mqtt::global_mqtt_client->publish(stats_topic, stats_payload, 0, true);
-        ESP_LOGI("scm_mqtt", "MQTT Stats Published -> ID: %s | Uptime: %u s | Successful Messages: %u | Sync Error Messages: %u | CRC Failures: %u",
-                 esphome::App.get_name().c_str(),
-                 static_cast<unsigned int>(esphome::millis() / 1000),
-                 static_cast<unsigned int>(this->successful_receive_count_),
-                 static_cast<unsigned int>(this->sync_error_receive_count_),
-                 static_cast<unsigned int>(this->crc_failure_count_));
+        ESP_LOGI("scm_mqtt", "MQTT Stats Published -> %s", stats_topic.c_str());
       }
 #endif
     });
@@ -166,7 +170,7 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
     int matched_variation = 0;
     std::vector<bool> *active_target_stream = nullptr;
 
-    auto decode_stream = [&](std::vector<bool> &stream, size_t s_idx, uint8_t &p_id, uint8_t &m_type, uint32_t &m_id, uint32_t &cons, uint16_t &tamp, uint16_t &exp_crc, uint16_t &calc_crc) -> DecodeResult {
+    auto decode_stream = [&](const std::vector<bool> &stream, size_t s_idx, uint8_t &p_id, uint8_t &m_type, uint32_t &m_id, uint32_t &cons, uint16_t &tamp, uint16_t &exp_crc, uint16_t &calc_crc) -> DecodeResult {
       size_t payload_idx = s_idx + 12;
       if (stream.size() < payload_idx + 96 + 16) return DecodeResult::TOO_SHORT;
 
@@ -185,18 +189,6 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
         ESP_LOGW("scm_checksum", "Checksum mismatch: calculated 0x%04X, expected 0x%04X", calc_crc, exp_crc);
         return DecodeResult::CRC_FAILED;
       }
-
-      // Can cause corruption if more than single bit errors present
-      // if (calc_crc != exp_crc) {
-      //   // Attempt O(1) single-bit error correction via syndrome lookup table
-      //   if (bit_stream_handling::correct_single_bit_error_lookup(stream, payload_idx, 96, exp_crc, calc_crc)) {
-      //     ESP_LOGI("scm_checksum", "Successfully corrected single-bit error via syndrome lookup!");
-      //     calc_crc = exp_crc; // Re-sync checksum validation state after fix
-      //   } else {
-      //     ESP_LOGW("scm_checksum", "Checksum mismatch: calculated 0x%04X, expected 0x%04X", calc_crc, exp_crc);
-      //     return DecodeResult::CRC_FAILED;
-      //   }
-      // }
 
       return DecodeResult::SUCCESS;
     };
@@ -243,7 +235,7 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
     }
 
     if (decode_result == DecodeResult::UNSUPPORTED_PROTOCOL) {
-      ESP_LOGD("scm_decode", "Unsupported protocol ID (0x%02X)", static_cast<unsigned int>(protocol_id));
+      ESP_LOGD("scm_decode", "Unsupported protocol ID (%u)", static_cast<unsigned int>(protocol_id));
       return false;
     }
 
@@ -254,7 +246,7 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
       return false;
     }
 
-    ESP_LOGI("scm_decode", "SCM+ Packet Decoded (Sync Errors: %u) -> Protocol ID: 0x%02X | Meter Type: 0x%02X | Meter ID: %u | Consumption: %u | Tamper: 0x%04X | CRC Expected: 0x%04X | CRC Calculated: 0x%04X",
+    ESP_LOGI("scm_decode", "SCM+ Packet Decoded (Sync Errors: %u) -> Protocol ID: %u | Meter Type: %u | Meter ID: %u | Consumption: %u | Tamper: 0x%04X | CRC Expected: 0x%04X | CRC Calculated: 0x%04X",
              static_cast<unsigned int>(sync_bit_errors),
              static_cast<unsigned int>(protocol_id),
              static_cast<unsigned int>(meter_type),
@@ -280,7 +272,7 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
       }
     }
 
-    // Successfully decoded, passed filters, and validated (including any corrected single-bit errors)
+    // Successfully decoded, passed filters, and validated
     this->successful_receive_count_++;
     if (sync_bit_errors > 0) {
       this->sync_error_receive_count_++;
@@ -288,18 +280,20 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
 
     JsonDocument doc;
     JsonObject root = doc.to<JsonObject>();
+    root["protocol_id"] = protocol_id;
+    root["meter_type"] = meter_type;
     root["meter_id"] = meter_id;
     root["consumption"] = consumption;
-    root["meter_type"] = meter_type;
     root["tamper"] = tamper;
-    root["protocol_id"] = protocol_id;
+    root["crc"] = expected_crc;
+    root["crc_calc"] = calculated_crc;
     this->json_callback_.call(root);
 
 #ifdef USE_MQTT
     if (esphome::mqtt::global_mqtt_client != nullptr && esphome::mqtt::global_mqtt_client->is_connected()) {
       std::string base_topic = this->custom_base_topic_;
       if (base_topic.empty()) {
-        base_topic = "esphome/" + esphome::App.get_name();
+        base_topic = "esphome/" + std::string(esphome::App.get_name());
       }
 
       std::string mqtt_topic = base_topic + "/" + std::to_string(meter_id);

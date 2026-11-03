@@ -33,7 +33,7 @@ inline std::optional<size_t> scan_stream(const std::vector<bool> &stream, uint16
     uint8_t current_errors = __builtin_popcount(diff);
 
     if (current_errors <= bit_errs) {
-      return i; // Return index where pattern match starts
+      return i; 
     }
   }
   return std::nullopt;
@@ -56,53 +56,7 @@ inline uint16_t calculate_crc16_ccitt(const std::vector<bool> &stream, size_t st
       }
     }
   }
-  return crc ^ 0xFFFF; // Apply final inversion (XOR out) to match Genibus / SCM+ spec
-}
-
-// Attempts to correct a single-bit error in the specified bit range of the stream.
-// Returns true if a single-bit error was found and corrected in-place.
-inline bool correct_single_bit_error(std::vector<bool> &stream, size_t start_idx, size_t num_bits, uint16_t expected_crc) {
-  for (size_t i = 0; i < num_bits; i++) {
-    // Flip the bit at the current position
-    stream[start_idx + i] = !stream[start_idx + i];
-
-    // Recompute the CRC for the payload
-    uint16_t calc_crc = calculate_crc16_ccitt(stream, start_idx, num_bits);
-
-    // If the CRC matches, we found and corrected the exact single-bit error!
-    if (calc_crc == expected_crc) {
-      return true;
-    }
-
-    // Otherwise, revert the bit and try the next position
-    stream[start_idx + i] = !stream[start_idx + i];
-  }
-  return false;
-}
-
-// Attempts to correct a single-bit error using an $O(1)$ syndrome lookup table
-inline bool correct_single_bit_error_lookup(std::vector<bool> &stream, size_t start_idx, size_t num_bits, uint16_t expected_crc, uint16_t calculated_crc) {
-  static std::unordered_map<uint16_t, size_t> syndrome_table = []() {
-    std::unordered_map<uint16_t, size_t> table;
-    std::vector<bool> dummy(96, false);
-    for (size_t i = 0; i < 96; i++) {
-      dummy[i] = true;
-      uint16_t crc = calculate_crc16_ccitt(dummy, 0, 96);
-      table[crc] = i;
-      dummy[i] = false;
-    }
-    return table;
-  }();
-
-  uint16_t syndrome = calculated_crc ^ expected_crc ^ 0xFFFF;
-  auto it = syndrome_table.find(syndrome);
-  if (it != syndrome_table.end()) {
-    size_t bit_idx = it->second;
-    stream[start_idx + bit_idx] = !stream[start_idx + bit_idx];
-    return true;
-  }
-  
-  return false;
+  return crc ^ 0xFFFF; 
 }
 
 }  // namespace bit_stream_handling
