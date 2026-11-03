@@ -41,6 +41,8 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
   uint32_t sync_error_receive_count_{0};
   uint32_t crc_failure_count_{0};
 
+  uint32_t stats_interval_ms_{3600000}; // Default to 60 minutes
+
   std::vector<uint32_t> filter_meter_ids_; 
   std::string custom_base_topic_{""}; 
 
@@ -52,8 +54,8 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
     ESP_LOGD("scm_status", "Component initialization / boot");
     this->set_led_color(0.0f, 0.0f, 1.0f);
 
-    // Set up a 60-minute interval (3,600,000 ms) to log and publish stats
-    this->set_interval("scm_stats_publisher", 3600000, [this]() {
+    // Set up the periodic interval using the configurable interval value
+    this->set_interval("scm_stats_publisher", this->stats_interval_ms_, [this]() {
       // Always log stats regardless of MQTT status
       ESP_LOGI("scm_stats", "Stats Report -> ID: %s | Uptime: %u s | Successful Messages: %u | Sync Error Messages: %u | CRC Failures: %u",
                esphome::App.get_name().c_str(),
@@ -92,6 +94,8 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
   void set_status_led(esphome::light::LightState *led) { this->status_led_ = led; }
 
   void set_custom_base_topic(const std::string &topic) { this->custom_base_topic_ = topic; }
+
+  void set_stats_interval(uint32_t interval_ms) { this->stats_interval_ms_ = interval_ms; }
 
   void add_target_meter_id(uint32_t meter_id) {
     this->filter_meter_ids_.push_back(meter_id);

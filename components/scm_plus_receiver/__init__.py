@@ -1,6 +1,6 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.const import CONF_ID, CONF_BRIGHTNESS, CONF_TOPIC
+from esphome.const import CONF_ID, CONF_BRIGHTNESS, CONF_STATS, CONF_TOPIC
 from esphome.components import remote_base, light
 from esphome import automation
 
@@ -13,6 +13,7 @@ ScmPlusDecoder = scm_plus_ns.class_("ScmPlusDecoder", cg.Component)
 CONF_RECEIVER_ID = "receiver_id"
 CONF_LED_ID = "led_id"
 CONF_METER_ID = "meter_id"
+CONF_STATS = "stats_interval"
 CONF_ON_JSON = "on_json"
 
 CONFIG_SCHEMA = cv.Schema({
@@ -22,6 +23,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_BRIGHTNESS, default="10%"): cv.percentage,
     cv.Optional(CONF_METER_ID): cv.ensure_list(cv.uint32_t),
     cv.Optional(CONF_TOPIC): cv.string,
+    cv.Optional(CONF_STATS, default="60min"): cv.positive_time_period_milliseconds,
     cv.Optional(CONF_ON_JSON): automation.validate_automation({}),
 }).extend(cv.COMPONENT_SCHEMA)
 
@@ -41,6 +43,9 @@ async def to_code(config):
             
     if CONF_TOPIC in config:
         cg.add(var.set_custom_base_topic(config[CONF_TOPIC]))
+
+    if CONF_STATS in config:
+        cg.add(var.set_stats_interval(config[CONF_STATS]))
         
     for conf in config.get(CONF_ON_JSON, []):
         await automation.build_callback_automation(
