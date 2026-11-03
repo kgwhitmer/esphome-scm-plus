@@ -41,8 +41,6 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
   uint32_t sync_error_receive_count_{0};
   uint32_t crc_failure_count_{0};
 
-  uint32_t stats_interval_ms_{3600000}; // Default to 60 minutes
-
   std::vector<uint32_t> filter_meter_ids_; 
   std::string custom_base_topic_{""}; 
 
@@ -53,49 +51,11 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
   void setup() override {
     ESP_LOGD("scm_status", "Component initialization / boot");
     this->set_led_color(0.0f, 0.0f, 1.0f);
-
-    // Set up the periodic interval using the configurable interval value
-    this->set_interval("scm_stats_publisher", this->stats_interval_ms_, [this]() {
-      // Always log stats regardless of MQTT status
-      ESP_LOGI("scm_stats", "Stats Report -> ID: %s | Uptime: %u s | Successful Messages: %u | Sync Error Messages: %u | CRC Failures: %u",
-               esphome::App.get_name().c_str(),
-               static_cast<unsigned int>(esphome::millis() / 1000),
-               static_cast<unsigned int>(this->successful_receive_count_),
-               static_cast<unsigned int>(this->sync_error_receive_count_),
-               static_cast<unsigned int>(this->crc_failure_count_));
-
-#ifdef USE_MQTT
-      if (esphome::mqtt::global_mqtt_client != nullptr && esphome::mqtt::global_mqtt_client->is_connected()) {
-        std::string base_topic = this->custom_base_topic_;
-        if (base_topic.empty()) {
-          base_topic = "esphome/" + std::string(esphome::App.get_name());
-        }
-
-        std::string stats_topic = base_topic + "/stats";
-
-        JsonDocument stats_doc;
-        JsonObject stats_root = stats_doc.to<JsonObject>();
-        stats_root["id"] = esphome::App.get_name();
-        stats_root["uptime"] = esphome::millis() / 1000; // Uptime in seconds
-        stats_root["successful_messages"] = this->successful_receive_count_;
-        stats_root["sync_error_messages"] = this->sync_error_receive_count_;
-        stats_root["crc_failures"] = this->crc_failure_count_;
-
-        std::string stats_payload;
-        serializeJson(stats_doc, stats_payload);
-
-        esphome::mqtt::global_mqtt_client->publish(stats_topic, stats_payload, 0, true);
-        ESP_LOGI("scm_mqtt", "MQTT Stats Published -> %s", stats_topic.c_str());
-      }
-#endif
-    });
   }
 
   void set_status_led(esphome::light::LightState *led) { this->status_led_ = led; }
 
   void set_custom_base_topic(const std::string &topic) { this->custom_base_topic_ = topic; }
-
-  void set_stats_interval(uint32_t interval_ms) { this->stats_interval_ms_ = interval_ms; }
 
   void add_target_meter_id(uint32_t meter_id) {
     this->filter_meter_ids_.push_back(meter_id);
@@ -282,15 +242,20 @@ class ScmPlusDecoder : public esphome::Component, public esphome::remote_base::R
       this->sync_error_receive_count_++;
     }
 
+    // Log stats immediately after a message has been successfully processed
+    ESP_LOGI("scm_stats", "Stats Report -> ID: %s | Uptime: %u s | Successful Messages: %u | Sync Error Messages: %u | CRC Failures: %u",
+             esphome::App.get_name().c_str(),
+             static_cast<unsigned int>(esphome::millis() / 1000),
+             static_cast<unsigned int>(this->successful_receive_count_),
+             static_cast<unsigned int>(this->sync_error_receive_count_),
+             static_cast<unsigned int>(this->crc_failure_count_));
+
     JsonDocument doc;
     JsonObject root = doc.to<JsonObject>();
-    root["protocol_id"] = protocol_id;
-    root["meter_type"] = meter_type;
     root["meter_id"] = meter_id;
     root["consumption"] = consumption;
-    root["tamper"] = tamper;
-    root["crc"] = expected_crc;
-    root["crc_calc"] = calculated_crc;
+    root["meter_type"] = meter_type;
+    root["protocol_id"] = protocol_id;
     this->json_callback_.call(root);
 
 #ifdef USE_MQTT

@@ -22,7 +22,6 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_BRIGHTNESS, default="10%"): cv.percentage,
     cv.Optional(CONF_METER_ID): cv.ensure_list(cv.uint32_t),
     cv.Optional(CONF_TOPIC): cv.string,
-    cv.Optional("stats_interval", default="60min"): cv.positive_time_period_milliseconds,
     cv.Optional(CONF_ON_JSON): automation.validate_automation({}),
 }).extend(cv.COMPONENT_SCHEMA)
 
@@ -43,9 +42,6 @@ async def to_code(config):
     if CONF_TOPIC in config:
         cg.add(var.set_custom_base_topic(config[CONF_TOPIC]))
 
-    if "stats_interval" in config:
-        cg.add(var.set_stats_interval(config["stats_interval"]))
-        
     for conf in config.get(CONF_ON_JSON, []):
         await automation.build_callback_automation(
             var, "add_on_json_callback", [(cg.JsonObject, "root")], conf
